@@ -1,14 +1,15 @@
-package main
+package src
 
 import (
 	"bufio"
 	"crypto/tls"
 	"errors"
-	"fmt"
-	"log"
+	log "github.com/sirupsen/logrus"
+	"github.com/t-tomalak/logrus-easy-formatter"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"os"
 	"strings"
 )
 
@@ -43,10 +44,10 @@ const (
 
 const readerBufSize = 64000
 const chanBufSize = 5
-const DEBUG = false
+const logLevel = log.InfoLevel
 const addr = ":50080"
-const cert = ""
-const privKey = ""
+var cert = ""
+var privKey = ""
 
 var handlerOutboundQ = make(chan HandlerResult, chanBufSize)
 var handlerInboundQ = make(chan net.Conn, chanBufSize)
@@ -57,7 +58,7 @@ func dispatchRequest() {
 	for {
 		conn := <-handlerInboundQ
 
-		log.Printf("Handling request from [%s]\n", conn.RemoteAddr().String())
+		log.Infof("Handling request from [%s]\n", conn.RemoteAddr().String())
 
 		// parse HTTP request
 		req, err := http.ReadRequest(bufio.NewReader(conn))
@@ -66,10 +67,10 @@ func dispatchRequest() {
 			continue
 		}
 
-		if DEBUG {
+		if logLevel == log.DebugLevel {
 			rawBytes, dumpErr := httputil.DumpRequest(req, false)
 			if dumpErr == nil {
-				log.Println(string(rawBytes))
+				log.Debugln(string(rawBytes))
 			}
 		}
 
@@ -101,7 +102,7 @@ func setupPipe() {
 			continue
 		}
 
-		log.Printf("Piped [%s] <--> [%s]", p.conn.RemoteAddr(), p.destination)
+		log.Infof("Piped [%s] <--> [%s]", p.conn.RemoteAddr(), p.destination)
 
 		// response OK
 		_, err = p.conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
@@ -134,12 +135,12 @@ func copyStream(src, dest net.Conn, dir int) {
 			break
 		}
 
-		if DEBUG {
+		if logLevel == log.DebugLevel {
 			if dir == SEND {
-				fmt.Printf("(%s) --%d bytes--> (%s)\n", src.RemoteAddr(), n, dest.RemoteAddr())
+				log.Debugf("(%s) --%d bytes--> (%s)\n", src.RemoteAddr(), n, dest.RemoteAddr())
 			}
 			if dir == RECV {
-				fmt.Printf("(%s) <--%d bytes-- (%s)\n", dest.RemoteAddr(), n, src.RemoteAddr())
+				log.Debugf("(%s) <--%d bytes-- (%s)\n", dest.RemoteAddr(), n, src.RemoteAddr())
 			}
 		}
 	}
@@ -149,7 +150,7 @@ func processDispatched() {
 	for {
 		result := <-handlerOutboundQ
 		if result.err != nil {
-			log.Printf("Fail to handle [%s], %s", result.conn.RemoteAddr(), result.err)
+			log.Errorf("Fail to handle [%s], %s", result.conn.RemoteAddr(), result.err)
 			_, _ = result.conn.Write([]byte("HTTP/1.1 400 " + result.err.Error()))
 			_ = result.conn.Close()
 			continue
@@ -162,28 +163,44 @@ func processDispatched() {
 func processPipeError() {
 	for {
 		e := <-pipeErrorQ
-		log.Printf("Fail to handle [%s], %s", e.src.RemoteAddr(), e.err)
+		log.Errorf("Fail to handle [%s], %s", e.src.RemoteAddr(), e.err)
 		_ = e.src.Close()
 		_ = e.dest.Close()
 	}
 }
 
-func main() {
-	var listener net.Listener
-	var err error
-
+func initListener(cert string, privKey string) (net.Listener, error) {
 	if cert != "" && privKey != "" {
 		// load key pair
 		cert, err := tls.LoadX509KeyPair(cert, privKey)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 		config := &tls.Config{Certificates: []tls.Certificate{cert}}
-		listener, err = tls.Listen("tcp", addr, config)
+		return tls.Listen("tcp", addr, config)
 	} else {
-		listener, err = net.Listen("tcp", addr)
+		return net.Listen("tcp", addr)
+	}
+}
+
+func initLogger(level log.Level) {
+	log.SetLevel(level)
+	log.SetFormatter(&easy.Formatter{
+		TimestampFormat: "2006-01-02 15:04:05",
+		LogFormat: "[%lvl%] %time% - %msg%",
+	})
+}
+
+func main() {
+	if cert == "" {
+		cert = os.Getenv("TUNNEL_CERT")
+	}
+	if privKey == "" {
+		privKey = os.Getenv("TUNNEL_KEY")
 	}
 
+	initLogger(logLevel)
+	l, err := initListener(cert, privKey)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -196,11 +213,11 @@ func main() {
 		go setupPipe()
 	}
 
-	log.Printf("Serving %s...\n", addr)
-	defer listener.Close()
+	log.Infof("Listening %s...\n", addr)
+	defer l.Close()
 
 	for {
-		conn, err := listener.Accept()
+		conn, err := l.Accept()
 		if err != nil {
 			log.Println(err)
 			continue
