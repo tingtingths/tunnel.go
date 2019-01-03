@@ -13,4 +13,6 @@ RUN go get "github.com/t-tomalak/logrus-easy-formatter" \
 
 RUN go build -o tunnel .
 
+RUN chmod -R +x /app
+
 CMD ["/app/tunnel"]
