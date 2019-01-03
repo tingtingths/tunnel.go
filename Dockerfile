@@ -4,15 +4,16 @@ ENV GOPATH /go
 
 RUN mkdir -p /app
 
-COPY src /app
+COPY . /app
 
 WORKDIR /app
 
-RUN go get "github.com/t-tomalak/logrus-easy-formatter" \
-    && go get "github.com/sirupsen/logrus"
+RUN go get -d -v "github.com/t-tomalak/logrus-easy-formatter" \
+    && go get -d -v "github.com/sirupsen/logrus"
 
 RUN go build -o tunnel .
 
 RUN chmod -R +x /app
 
-CMD ["/app/tunnel"]
+ENTRYPOINT ["go"]
+CMD ["run", "/app/tunnel.go"]
