@@ -2,13 +2,13 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"os"
 	"strings"
 )
 
@@ -45,6 +45,8 @@ const readerBufSize = 64000
 const chanBufSize = 5
 const DEBUG = false
 const addr = ":50080"
+const cert = ""
+const privKey = ""
 
 var handlerOutboundQ = make(chan HandlerResult, chanBufSize)
 var handlerInboundQ = make(chan net.Conn, chanBufSize)
@@ -60,7 +62,6 @@ func dispatchRequest() {
 		// parse HTTP request
 		req, err := http.ReadRequest(bufio.NewReader(conn))
 		if err != nil {
-			log.Fatal(err)
 			handlerOutboundQ <- HandlerResult{conn, "", err}
 			continue
 		}
@@ -168,10 +169,23 @@ func processPipeError() {
 }
 
 func main() {
-	listener, err := net.Listen("tcp", addr)
+	var listener net.Listener
+	var err error
+
+	if cert != "" && privKey != "" {
+		// load key pair
+		cert, err := tls.LoadX509KeyPair(cert, privKey)
+		if err != nil {
+			log.Fatal(err)
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cert}}
+		listener, err = tls.Listen("tcp", addr, config)
+	} else {
+		listener, err = net.Listen("tcp", addr)
+	}
+
 	if err != nil {
 		log.Fatal(err)
-		os.Exit(1)
 	}
 
 	go processDispatched()
