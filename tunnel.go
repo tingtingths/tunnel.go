@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"errors"
+	"flag"
 	log "github.com/sirupsen/logrus"
 	"github.com/t-tomalak/logrus-easy-formatter"
 	"net"
@@ -42,12 +43,13 @@ const (
 	RECV = 2
 )
 
-const readerBufSize = 64000
 const chanBufSize = 5
-const logLevel = log.InfoLevel
 const addr = ":50080"
+
+var readerBufSize int
 var cert = ""
 var privKey = ""
+var logLevel log.Level
 
 var handlerOutboundQ = make(chan HandlerResult, chanBufSize)
 var handlerInboundQ = make(chan net.Conn, chanBufSize)
@@ -111,8 +113,8 @@ func setupPipe() {
 			continue
 		}
 
-		go copyStream(p.conn, dest, SEND)
-		go copyStream(dest, p.conn, RECV)
+		go copyStream2(p.conn, dest)
+		go copyStream2(dest, p.conn)
 	}
 }
 
@@ -137,12 +139,22 @@ func copyStream(src, dest net.Conn, dir int) {
 
 		if logLevel == log.DebugLevel {
 			if dir == SEND {
-				log.Debugf("(%s) --%d bytes--> (%s)\n", src.RemoteAddr(), n, dest.RemoteAddr())
+				log.Debugf("[%s]\t--%d bytes-->\t[%s]\n", src.RemoteAddr(), n, dest.RemoteAddr())
 			}
 			if dir == RECV {
-				log.Debugf("(%s) <--%d bytes-- (%s)\n", dest.RemoteAddr(), n, src.RemoteAddr())
+				log.Debugf("[%s]\t<--%d bytes--\t[%s]\n", dest.RemoteAddr(), n, src.RemoteAddr())
 			}
 		}
+	}
+}
+
+func copyStream2(src, dest net.Conn) {
+	r := bufio.NewReaderSize(src, readerBufSize)
+	w := bufio.NewWriterSize(dest, readerBufSize)
+
+	_, err := r.WriteTo(w)
+	if err != nil {
+		reportPipeError(src, dest, err)
 	}
 }
 
@@ -171,6 +183,8 @@ func processPipeError() {
 
 func initListener(cert string, privKey string) (net.Listener, error) {
 	if cert != "" && privKey != "" {
+		println("CERT: %s", cert)
+		println("KEY: %s", privKey)
 		// load key pair
 		cert, err := tls.LoadX509KeyPair(cert, privKey)
 		if err != nil {
@@ -187,20 +201,34 @@ func initLogger(level log.Level) {
 	log.SetLevel(level)
 	log.SetFormatter(&easy.Formatter{
 		TimestampFormat: "2006-01-02 15:04:05",
-		LogFormat: "[%lvl%] %time% - %msg%",
+		LogFormat:       "[%lvl%] %time% - %msg%",
 	})
 }
 
 func main() {
-	if cert == "" {
-		cert = os.Getenv("TUNNEL_CERT")
-	}
-	if privKey == "" {
-		privKey = os.Getenv("TUNNEL_KEY")
+	// arguments
+	var debug = flag.Bool("debug", false, "Debug output")
+	var cert = flag.String("cert", "", "X509 Certificate")
+	var privKey = flag.String("key", "", "Private key")
+	var bufSize = flag.Int("buffer", 64000, "Buffer size")
+	flag.Parse()
+
+	logLevel = log.InfoLevel
+	if *debug {
+		logLevel = log.DebugLevel
 	}
 
+	if *cert == "" {
+		*cert = os.Getenv("TUNNEL_CERT")
+	}
+	if *privKey == "" {
+		*privKey = os.Getenv("TUNNEL_KEY")
+	}
+
+	readerBufSize = *bufSize
+
 	initLogger(logLevel)
-	l, err := initListener(cert, privKey)
+	l, err := initListener(*cert, *privKey)
 	if err != nil {
 		log.Fatal(err)
 	}
