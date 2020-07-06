@@ -1,4 +1,4 @@
-FROM golang:1.11
+FROM golang:1.14 as builder
 
 ENV GOPATH /go
 
@@ -8,12 +8,14 @@ COPY . /app
 
 WORKDIR /app
 
-RUN go get -d -v "github.com/t-tomalak/logrus-easy-formatter" \
-    && go get -d -v "github.com/sirupsen/logrus"
-
 RUN go build -o tunnel .
 
 RUN chmod -R +x /app
 
-ENTRYPOINT ["go"]
-CMD ["run", "/app/tunnel.go"]
+FROM alpine:latest
+
+COPY --from=builder /app/tunnel /app/tunnel
+
+EXPOSE 50080
+
+ENTRYPOINT ["/app/tunnel"]
