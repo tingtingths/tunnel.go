@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"flag"
+	"fmt"
 	log "github.com/sirupsen/logrus"
 	"github.com/t-tomalak/logrus-easy-formatter"
 	"net"
@@ -16,6 +18,7 @@ import (
 
 type HandlerResult struct {
 	conn        net.Conn
+	status      int
 	destination string
 	err         error
 }
@@ -44,11 +47,11 @@ const (
 )
 
 const chanBufSize = 5
-const addr = ":50080"
 
+// init from arguments
+var addr string
+var b64Cred string
 var readerBufSize int
-var cert = ""
-var privKey = ""
 var logLevel log.Level
 
 var handlerOutboundQ = make(chan HandlerResult, chanBufSize)
@@ -65,7 +68,7 @@ func dispatchRequest() {
 		// parse HTTP request
 		req, err := http.ReadRequest(bufio.NewReader(conn))
 		if err != nil {
-			handlerOutboundQ <- HandlerResult{conn, "", err}
+			handlerOutboundQ <- HandlerResult{conn, 400, "", err}
 			continue
 		}
 
@@ -77,20 +80,28 @@ func dispatchRequest() {
 		}
 
 		if strings.ToLower(req.Method) != "connect" {
-			_, _ = conn.Write([]byte("Unsupported request method " + req.Method + "..."))
-			handlerOutboundQ <- HandlerResult{conn, "", errors.New("unsupported request method " + req.Method)}
+			handlerOutboundQ <- HandlerResult{conn, 405, "", errors.New("Unsupported method " + req.Method)}
 			continue
+		}
+
+		// check credential
+		if b64Cred != "" {
+			var auth = req.Header.Get("Proxy-Authorization")
+			auth = strings.Replace(auth, "Basic ", "", 1)
+			if err != nil || auth != b64Cred {
+				handlerOutboundQ <- HandlerResult{conn, 401, "", errors.New("Unauthorized")}
+				continue
+			}
 		}
 
 		// get target
 		reqUrl := req.RequestURI
 		if len(strings.TrimSpace(reqUrl)) == 0 {
-			_, _ = conn.Write([]byte("Empty request URL..."))
-			handlerOutboundQ <- HandlerResult{conn, "", errors.New("empty request url")}
+			handlerOutboundQ <- HandlerResult{conn, 400, "", errors.New("Empty request url")}
 			continue
 		}
 
-		handlerOutboundQ <- HandlerResult{conn, reqUrl, nil}
+		handlerOutboundQ <- HandlerResult{conn, 200, reqUrl, nil}
 	}
 }
 
@@ -100,21 +111,24 @@ func setupPipe() {
 
 		dest, err := net.Dial("tcp", p.destination)
 		if err != nil {
-			handlerOutboundQ <- HandlerResult{p.conn, p.destination, err}
+			handlerOutboundQ <- HandlerResult{p.conn, 500, p.destination, err}
 			continue
 		}
 
-		log.Infof("Piped [%s] <--> [%s]", p.conn.RemoteAddr(), p.destination)
+		log.Infof("Piped [%s] <--> [%s]\n", p.conn.RemoteAddr(), p.destination)
 
 		// response OK
 		_, err = p.conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 		if err != nil {
-			handlerOutboundQ <- HandlerResult{p.conn, p.destination, err}
+			handlerOutboundQ <- HandlerResult{p.conn, 500, p.destination, err}
 			continue
 		}
 
-		go copyStream2(p.conn, dest)
-		go copyStream2(dest, p.conn)
+		go copyStream(p.conn, dest, SEND)
+		go copyStream(dest, p.conn, RECV)
+
+		//go copyStream2(p.conn, dest)
+		//go copyStream2(dest, p.conn)
 	}
 }
 
@@ -162,8 +176,8 @@ func processDispatched() {
 	for {
 		result := <-handlerOutboundQ
 		if result.err != nil {
-			log.Errorf("Fail to handle [%s], %s", result.conn.RemoteAddr(), result.err)
-			_, _ = result.conn.Write([]byte("HTTP/1.1 400 " + result.err.Error()))
+			log.Errorf("Fail to handle [%s], %s\n", result.conn.RemoteAddr(), result.err)
+			_, _ = result.conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", result.status, result.err.Error())))
 			_ = result.conn.Close()
 			continue
 		}
@@ -175,7 +189,7 @@ func processDispatched() {
 func processPipeError() {
 	for {
 		e := <-pipeErrorQ
-		log.Errorf("Fail to handle [%s], %s", e.src.RemoteAddr(), e.err)
+		log.Warnf("Fail to handle [%s], %s\n", e.src.RemoteAddr(), e.err)
 		_ = e.src.Close()
 		_ = e.dest.Close()
 	}
@@ -183,8 +197,8 @@ func processPipeError() {
 
 func initListener(cert string, privKey string) (net.Listener, error) {
 	if cert != "" && privKey != "" {
-		println("CERT: %s", cert)
-		println("KEY: %s", privKey)
+		log.Infof("Cert: %s\n", cert)
+		log.Infof("Key: %s\n", privKey)
 		// load key pair
 		cert, err := tls.LoadX509KeyPair(cert, privKey)
 		if err != nil {
@@ -211,6 +225,8 @@ func main() {
 	var cert = flag.String("cert", "", "X509 Certificate")
 	var privKey = flag.String("key", "", "Private key")
 	var bufSize = flag.Int("buffer", 64000, "Buffer size")
+	var credential = flag.String("auth", "", "<username>:<password> credential for proxy authorization")
+	var port = flag.Int("port", 8080, "Listening port")
 	flag.Parse()
 
 	logLevel = log.InfoLevel
@@ -218,6 +234,10 @@ func main() {
 		logLevel = log.DebugLevel
 	}
 
+	addr = fmt.Sprintf(":%d", *port)
+	if *credential != "" {
+		b64Cred = base64.StdEncoding.EncodeToString([]byte(*credential))
+	}
 	if *cert == "" {
 		*cert = os.Getenv("TUNNEL_CERT")
 	}
