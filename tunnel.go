@@ -237,7 +237,7 @@ func parseMethodsStr(methods string) []string {
 func main() {
 	// arguments
 	var debug = flag.Bool("debug", false, "Debug output")
-	var methodStr = flag.String("methods", "CONNECT", "Allowed methods separated with comma. Default \"CONNECT\" only.")
+	var methodStr = flag.String("methods", "CONNECT", "Allowed methods separated with comma.")
 	var cert = flag.String("cert", "", "X509 Certificate")
 	var privKey = flag.String("key", "", "Private key")
 	var bufSize = flag.Int("buffer", 64000, "Buffer size")

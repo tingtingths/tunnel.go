@@ -20,6 +20,8 @@ Usage of ./tunnel:
         Debug output
   -key string
         Private key
+  -methods string
+        Allowed methods separated with comma. Default "CONNECT" only. (default "CONNECT")
   -port int
         Listening port (default 8080)
 ```
