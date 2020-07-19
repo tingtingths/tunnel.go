@@ -53,6 +53,7 @@ var addr string
 var b64Cred string
 var readerBufSize int
 var logLevel log.Level
+var methods = make(map[string]bool)
 
 var handlerOutboundQ = make(chan HandlerResult, chanBufSize)
 var handlerInboundQ = make(chan net.Conn, chanBufSize)
@@ -79,7 +80,7 @@ func dispatchRequest() {
 			}
 		}
 
-		if strings.ToLower(req.Method) != "connect" {
+		if !methods[strings.ToLower(req.Method)] {
 			handlerOutboundQ <- HandlerResult{conn, 405, "", errors.New("Unsupported method " + req.Method)}
 			continue
 		}
@@ -219,9 +220,24 @@ func initLogger(level log.Level) {
 	})
 }
 
+func parseMethodsStr(methods string) []string {
+	var ret []string
+
+	for _, s := range strings.Split(methods, ",") {
+		s = strings.Trim(s, " ")
+		if len(s) == 0 {
+			continue
+		}
+		ret = append(ret, strings.ToLower(s))
+	}
+
+	return ret
+}
+
 func main() {
 	// arguments
 	var debug = flag.Bool("debug", false, "Debug output")
+	var methodStr = flag.String("methods", "CONNECT", "Allowed methods separated with comma. Default \"CONNECT\" only.")
 	var cert = flag.String("cert", "", "X509 Certificate")
 	var privKey = flag.String("key", "", "Private key")
 	var bufSize = flag.Int("buffer", 64000, "Buffer size")
@@ -232,6 +248,14 @@ func main() {
 	logLevel = log.InfoLevel
 	if *debug {
 		logLevel = log.DebugLevel
+	}
+
+	for _, s := range parseMethodsStr(*methodStr) {
+		methods[s] = true
+	}
+	if len(methods) == 0 {
+		println("Not enough methods value supplied...")
+		os.Exit(1)
 	}
 
 	addr = fmt.Sprintf(":%d", *port)
