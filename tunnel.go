@@ -152,13 +152,11 @@ func copyStream(src, dest net.Conn, dir int) {
 			break
 		}
 
-		if logLevel == log.DebugLevel {
-			if dir == SEND {
-				log.Debugf("[%s]\t--%d bytes-->\t[%s]\n", src.RemoteAddr(), n, dest.RemoteAddr())
-			}
-			if dir == RECV {
-				log.Debugf("[%s]\t<--%d bytes--\t[%s]\n", dest.RemoteAddr(), n, src.RemoteAddr())
-			}
+		if dir == SEND {
+			log.Tracef("[%s]\t--%d bytes-->\t[%s]\n", src.RemoteAddr(), n, dest.RemoteAddr())
+		}
+		if dir == RECV {
+			log.Tracef("[%s]\t<--%d bytes--\t[%s]\n", dest.RemoteAddr(), n, src.RemoteAddr())
 		}
 	}
 }
