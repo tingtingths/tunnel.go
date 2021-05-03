@@ -90,7 +90,7 @@ func dispatchRequest() {
 			var auth = req.Header.Get("Proxy-Authorization")
 			auth = strings.Replace(auth, "Basic ", "", 1)
 			if err != nil || auth != b64Cred {
-				handlerOutboundQ <- HandlerResult{conn, 401, "", errors.New("Unauthorized")}
+				handlerOutboundQ <- HandlerResult{conn, 407, "", errors.New("Proxy Authentication Required")}
 				continue
 			}
 		}
