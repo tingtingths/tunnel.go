@@ -18,9 +18,9 @@ import (
 
 type HandlerResult struct {
 	conn        net.Conn
-	status      int
 	destination string
 	err         error
+	response    *string
 }
 
 type PipeError struct {
@@ -69,7 +69,8 @@ func dispatchRequest() {
 		// parse HTTP request
 		req, err := http.ReadRequest(bufio.NewReader(conn))
 		if err != nil {
-			handlerOutboundQ <- HandlerResult{conn, 400, "", err}
+			resp := fmt.Sprintf("HTTP/1.1 %d %s\r\n", 400, err.Error())
+			handlerOutboundQ <- HandlerResult{conn, "", err, &resp}
 			continue
 		}
 
@@ -81,7 +82,9 @@ func dispatchRequest() {
 		}
 
 		if !methods[strings.ToLower(req.Method)] {
-			handlerOutboundQ <- HandlerResult{conn, 405, "", errors.New("Unsupported method " + req.Method)}
+			err := errors.New("Unsupported method " + req.Method)
+			resp := fmt.Sprintf("HTTP/1.1 %d %s\r\n", 405, err.Error())
+			handlerOutboundQ <- HandlerResult{conn, "", err, &resp}
 			continue
 		}
 
@@ -90,7 +93,9 @@ func dispatchRequest() {
 			var auth = req.Header.Get("Proxy-Authorization")
 			auth = strings.Replace(auth, "Basic ", "", 1)
 			if err != nil || auth != b64Cred {
-				handlerOutboundQ <- HandlerResult{conn, 407, "", errors.New("Proxy Authentication Required")}
+				err = errors.New("Proxy Authentication Required")
+				resp := fmt.Sprintf("HTTP/1.1 %d %s\r\nProxy-Authenticate: Basic\r\n", 407, err.Error())
+				handlerOutboundQ <- HandlerResult{conn, "", err, &resp}
 				continue
 			}
 		}
@@ -98,11 +103,13 @@ func dispatchRequest() {
 		// get target
 		reqUrl := req.RequestURI
 		if len(strings.TrimSpace(reqUrl)) == 0 {
-			handlerOutboundQ <- HandlerResult{conn, 400, "", errors.New("Empty request url")}
+			err := errors.New("Empty request url")
+			resp := fmt.Sprintf("HTTP/1.1 %d %s\r\n", 400, err.Error())
+			handlerOutboundQ <- HandlerResult{conn, "", err, &resp}
 			continue
 		}
 
-		handlerOutboundQ <- HandlerResult{conn, 200, reqUrl, nil}
+		handlerOutboundQ <- HandlerResult{conn, reqUrl, nil, nil}
 	}
 }
 
@@ -112,7 +119,8 @@ func setupPipe() {
 
 		dest, err := net.Dial("tcp", p.destination)
 		if err != nil {
-			handlerOutboundQ <- HandlerResult{p.conn, 500, p.destination, err}
+			resp := fmt.Sprintf("HTTP/1.1 %d %s\r\n", 500, err.Error())
+			handlerOutboundQ <- HandlerResult{p.conn, p.destination, err, &resp}
 			continue
 		}
 
@@ -121,7 +129,8 @@ func setupPipe() {
 		// response OK
 		_, err = p.conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 		if err != nil {
-			handlerOutboundQ <- HandlerResult{p.conn, 500, p.destination, err}
+			resp := fmt.Sprintf("HTTP/1.1 %d %s\r\n", 500, err.Error())
+			 handlerOutboundQ <- HandlerResult{p.conn, p.destination, err, &resp}
 			continue
 		}
 
@@ -176,7 +185,9 @@ func processDispatched() {
 		result := <-handlerOutboundQ
 		if result.err != nil {
 			log.Errorf("Fail to handle [%s], %s\n", result.conn.RemoteAddr(), result.err)
-			_, _ = result.conn.Write([]byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", result.status, result.err.Error())))
+			if result.response != nil {
+				_, _ = result.conn.Write([]byte(*result.response))
+			}
 			_ = result.conn.Close()
 			continue
 		}
