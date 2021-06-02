@@ -136,9 +136,6 @@ func setupPipe() {
 
 		go copyStream(p.conn, dest, SEND)
 		go copyStream(dest, p.conn, RECV)
-
-		//go copyStream2(p.conn, dest)
-		//go copyStream2(dest, p.conn)
 	}
 }
 
@@ -167,16 +164,6 @@ func copyStream(src, dest net.Conn, dir int) {
 		if dir == RECV {
 			log.Tracef("[%s]\t<--%d bytes--\t[%s]\n", dest.RemoteAddr(), n, src.RemoteAddr())
 		}
-	}
-}
-
-func copyStream2(src, dest net.Conn) {
-	r := bufio.NewReaderSize(src, readerBufSize)
-	w := bufio.NewWriterSize(dest, readerBufSize)
-
-	_, err := r.WriteTo(w)
-	if err != nil {
-		reportPipeError(src, dest, err)
 	}
 }
 
