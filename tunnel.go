@@ -222,7 +222,9 @@ func initListener(cert string, privKey string) (net.Listener, error) {
 
 func initLogger(level log.Level) {
 	log.SetLevel(level)
-	log.SetFormatter(&log.TextFormatter{})
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
 }
 
 func parseMethodsStr(methods string) []string {
