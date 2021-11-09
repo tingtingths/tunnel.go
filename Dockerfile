@@ -1,4 +1,4 @@
-FROM golang:1.14 as builder
+FROM golang:1.17 as builder
 
 ENV GOPATH /go
 
@@ -14,7 +14,7 @@ RUN chmod -R +x /app
 
 FROM alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates tzdata
 
 COPY --from=builder /app/tunnel /app/tunnel
 
