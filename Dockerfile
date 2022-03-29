@@ -20,4 +20,4 @@ COPY --from=builder /app/tunnel /app/tunnel
 
 EXPOSE 8080
 
-CMD ["/app/tunnel"]
+ENTRYPOINT ["/app/tunnel"]
